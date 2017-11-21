@@ -357,7 +357,7 @@ UsedLibrary="C:/EAGLE 8.4.0/lbr/stepper_drivers_etc.lbr"
 
 [Win_1]
 Type="Control Panel"
-Loc="676 0 1356 695"
+Loc="469 60 1149 755"
 State=2
 Number=0
 
