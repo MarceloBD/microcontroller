@@ -22,12 +22,24 @@ RS	EQU 00h		;RS do LCD para ser usado como endereço
 RW	EQU 01h		;RW do LCD
 ENAB	EQU 02h		;enab do LCD
 
-ASCIIL 	EQU 2Ch		;ascii low da leitura AD 
-ASCIIH 	EQU 2Dh		;ascii high da leitura AD
+ASCIIL 	EQU 2Ch		;ascii low de conversao 
+ASCIIH 	EQU 2Dh		;ascii high de conversao
 
+STARTED EQU F0		;se foi dito para o programa ser iniciado 
+
+SENSOR	EQU 2Eh		;flag para saber se contagem do sensor foi iniciada
+SCOUNT 	EQU 2Fh		;contador do sensor otico 
+STIMEL 	EQU 30h		;conta 10 segundos low bits
+STIMEH 	EQU 31h		;conta 10 segundso high bits
+
+CMOTOR	EQU 32h 	;clock do motor
 ;*****************************************
 	org 0 
 	SJMP START
+;*****************************************
+	org 0003h
+	ACALL FEX0
+	RETI 
 ;*****************************************
 	org 000bh
 	ACALL FTM0
@@ -53,20 +65,46 @@ START: 	ACALL SRL 		;seta o modo serial
 	SETB EX0 		;liga interrupcao para o sensor otico
 	SETB EX1 		;liga interrupcao para o teclado matricial 
 	SETB EA
+
+	MOV DPTR, #8000h			;inicia o teclado matricial para receber interrupcao
+	MOV A, #0h
+	MOVX @DPTR, A
+	  
 	ACALL SETDISPLAY 
+
+	JNB STARTED, $		;enquanto nao for iniciado pelo teclado matricial 
 
 LOOP:	ACALL READAD		
 	ACALL WRITEDA
+	MOV A, ADVALUE
 	ACALL HEX2ASCII
 	ACALL SENDADDISPLAY 
 	ACALL SENDADSERIAL 
 	ACALL LIGHTLEDS
 	SJMP LOOP 
 ;*****************************************
+;rotina que liga os motores 
+;inibe todos 6h 0100 1001 0010 = 6492h e horario
+TURNMOTORS:
+	MOV DPTR, #6492h
+	MOVX @DPTR, A 
+	RET
+;*****************************************
+;rotina que cuida da interrupcao provocada pelo sensor otico 
+;e realiza a ligacao dos motores 
+FEX0:	JB SENSOR.0, FEX0SET
+	MOV SENSOR, #0FFh
+	ACALL TURNMOTORS
+	SETB TR0 
+FEX0SET:MOV A, SCOUNT
+	ADD A,#01h
+	MOV SCOUNT,A 	
+	RET
+;*****************************************
 ;rotina para acender os leds a cada 20h
 LIGHTLEDS:
 	MOV B, #020h
-	MOV A, READAD
+	MOV A, ADVALUE
 	DIV AB
 	MOV DPL, A
 	MOV DPH, #40h
@@ -100,7 +138,6 @@ SENDADDISPLAY:
 ;*****************************************
 ;rotina de conversao de dois digitos para ascii
 HEX2ASCII:
-	MOV A, READAD
 	MOV R1, A
 	ANL A, #0Fh
 	ACALL CONVHEX2ASCII
@@ -114,7 +151,7 @@ HEX2ASCII:
 ;*****************************************
 ;rotina de conversão de um digito para ascii
 CONVHEX2ASCII:
-	CNJA A, #0Ah, CONVTEST
+	CJNE A, #0Ah, CONVTEST
 CONVTEST: 
 	JC CONVNUM
 	ADD A, #07h
@@ -264,18 +301,67 @@ SETTM0:	MOV A, TMOD
 	SETB ET0
 	RET
 ;*****************************************
+;envia os valores contados pelo sensor para o lcd 
+SENDCOUNTLCD:
+	MOV A, SCOUNT
+	ACALL HEX2ASCII
+	MOV A, #40h
+	ACALL POS 
+	MOV A, ASCIIH
+	ACALL SENDLCD
+	MOV A, ASCIIL
+	ACALL SENDLCD
+	RET
+;*****************************************
+;realiza o clock dos motores
+;clock 0 com inibe -> 6h 0100 1001 0010 = 6492h
+;clock 1 com inibe -> 6h 0110 1101 1011 = 66DBh
+CLOCKMOTOR:
+	MOV A, CMOTOR
+	CJNE A,#00h, CLOCK0 	;se ultimo clock for 1 pula 
+	MOV CMOTOR, #0FFh
+	MOV DPTR, #6492h
+	MOVX @DPTR, A
+	RET
+CLOCK0: MOV CMOTOR, #00h
+	MOV DPTR, #66DBh
+	MOVX @DPTR, A
+	RET
+;*****************************************
 ;Rotina que trata de recarregar o timer em sua interrupcao 
 ;alem de armazenar na memoria ram o valor de AD a cada 1s 
 FTM0:	MOV TH0, #0FFh
 	MOV TL0, #0FBh
 
-	MOV A, ADCOUNT			;verifica se deve ser escrito na memoria 
+;primeiramente, ele faz a contagem do sensor otico e aplica o clock dos motores
+	JNB SENSOR.0, FTM0M
+	ACALL CLOCKMOTOR
+	MOV A, STIMEH
+	CJNE A, #10d, FTM0C		;caso chegue a 10 segundos, deliga-se a interrupcao do sensor
+	CLR EX0 
+	MOV SENSOR, #00h
+	ACALL SENDCOUNTLCD
+
+FTM0C: 	MOV DPL, STIMEL
+	MOV DPH, STIMEH
+	INC DPTR
+	MOV A, DPL 
 	CJNE A, #100d, FTM0ADD
+	MOV DPL, #0h
+
+FTM0ADD:MOV STIMEH, DPH
+	MOV STIMEL, DPL 
+	;APLICA CLOCK NO MOTOR 
+	
+;**
+FTM0M:	MOV A, ADCOUNT			;verifica se deve ser escrito na memoria 
+	CJNE A, #100d, FTM0COUNT
 	ACALL WRITEMEM
 	MOV ADCOUNT, #0h		;zera novamente o contador 
 	SJMP FTM0F	
 
-FTM0ADD:ADD A, #01h
+FTM0COUNT:
+	ADD A, #01h
 	MOV ADCOUNT, A
 
 FTM0F:	MOV A, ADF			;complemente flag 
@@ -335,15 +421,9 @@ WRITEDA:MOV DPTR, #DAA
 ;*****************************************
 ;Rotina de interrupcao externa 1, ativada quando teclado matricial
 ;for pressionado  
-FEX1:	MOV A, KMA
-	CJNE A, #24h, FEX1ADD	;compara para saber se é ultimo input
-;caso for segundo input, reseta enderco e
-;chama rotina controladora de comandos do teclado matricial 
-	MOV KMA, #21h
-	ACALL ACK
-	RET
+FEX1:	
 ;caso nao for ultimo, salva dado e incrementa endereco
-FEX1ADD:ACALL RDK
+	ACALL RDK
 	MOV A, KMA
 	MOV R0, A
 	MOV A, DRK
@@ -352,6 +432,15 @@ FEX1ADD:ACALL RDK
 	MOV A, KMA
 	ADD A, #01h		
 	MOV KMA, A
+	
+	CJNE A, #24h, FERET	;compara para saber se é ultimo input
+;caso for segundo input, reseta endereco e
+;chama rotina controladora de comandos do teclado matricial 
+	MOV KMA, #21h
+	ACALL ACK
+FERET:	MOV DPTR, #8000h			;volta o teclado matricial para receber interrupcao
+	MOV A, #0h
+	MOVX @DPTR, A
 	RET
 ;*****************************************
 ;Funcao que le keypad e salva em DRK (data read from keypad)
@@ -453,7 +542,7 @@ ACK:
 	CJNE A, #04h, ACKE
 	MOV A, KMA4
 	CJNE A, #0Dh, ACKE
-	;FUNCAO QUE DISPARA PROCESSO 
+	MOV STARTED, #1b
 	RET
 ACKE:	
 ;identificacao de E123h
@@ -467,19 +556,22 @@ ACKE:
 	CJNE A, #03h, ACKF
 
 	MOV DPTR, #KEM
-	ACALL SEND
-	;FUNCAO PARA ENVIAR PARA O DISPLAY LCD
+	ACALL SENDL 
 
-ACKF:	RET 
+ACKF:	RET 	
 ;*****************************************
-SEND:	
 ;Envia dados via serial 
 SENDL:	MOV A, #00h
 	MOVC A, @A+DPTR
 	CJNE A, #'$', SENDC		;Envia dados ate achar o cifrao 
 	RET
 
-SENDC:	MOV SBUF, A	
+SENDC:	MOV SBUF, A			;envia para o serial e para o lcd
+	MOV R0, A
+	MOV A, #0h
+	ACALL POS
+	MOV A, R0
+	ACALL SENDLCD			
 	JNB TI, $
 	CLR TI
 	INC DPTR

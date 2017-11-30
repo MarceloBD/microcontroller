@@ -1,0 +1,14 @@
+0001 1111 1111 1111 -> 0000 a 1FFF Memória de Programa //trocar ci
+0011 1111 1111 1111 -> 2000 a 3FFF Memória Ram //arrumar posicão da trilha de endereço
+0100 0000 0000 0000 -> 4000 a 4007 Leds 
+0110 0000 0000 0000 -> 6000 a 6FFF Controle dos motores //conectar os fios
+1000 0000 0000 0000 -> 8000 a 8007 Teclado Matricial //conferir se ha necessecidade de ativação por write 
+1010 0001 0000 0000 -> A100 a A107 Display LCD Porta de Dados
+1010 0010 0000 0000 -> A200 a A224 Display LCD Porta de Controle
+		       A208/A209 RS
+		       A210/A212 RW
+		       A220/A224 ENAB 
+1100 0001 0000 0000 -> C100 a C107 Conversor A/D Porta de Dados //verificar como se le e escreve
+1100 0010 0000 0000 -> C200 a C203 Conversor A/D Porta de Controle 
+1100 0100 0000 0000 -> C400 a C407 Conversor D/A Porta de Dados 
+ 
